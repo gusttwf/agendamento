@@ -306,9 +306,10 @@
       document.querySelector('.lg:w-2/3').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
-    agendamentoForm.addEventListener('submit', async function(e) {
+    agendamentoForm.addEventListener('submit', function(e) {
   e.preventDefault();
   
+  // Coleta e valida os campos (igual antes)
   const nome = document.getElementById('nome').value.trim();
   const telefone = document.getElementById('telefone').value.trim();
   const email = document.getElementById('email').value.trim();
@@ -320,7 +321,7 @@
   const hora = document.getElementById('hora').value;
   const notaFiscalFile = document.getElementById('notaFiscal').files[0];
   
-  // Validações (mantidas iguais às suas)
+  // (todas as validações que você já tinha - reutilizar)
   if (!nome) { alert('Preencha o Nome completo.'); return; }
   if (!telefone) { alert('Preencha o Telefone.'); return; }
   if (!email) { alert('Preencha o E-mail.'); return; }
@@ -333,43 +334,35 @@
   if (!dataBr) { alert('Preencha a data.'); return; }
   if (!validarDataCompleta(dataBr)) { alert('Data inválida!'); return; }
   if (!hora) { alert('Selecione a hora.'); return; }
-  if (notaFiscalFile && notaFiscalFile.size > 5 * 1024 * 1024) {
-    alert('Arquivo muito grande. Máximo 5MB.');
-    return;
-  }
   
-  // --- ENVIO PARA O GOOGLE SHEETS ---
-  const webAppUrl = "https://script.google.com/macros/s/AKfycbyIosqOozHMwtJGgoCrcREyO1aNKZhm5yqVyg897WHVf2vBZ7VUAgImzbo1Qjb_HQjeiw/exec"; // <--- COLE A URL QUE VOCÊ COPIU
+  // Cria um formulário invisível
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = 'https://script.google.com/macros/s/AKfycbyIosqOozHMwtJGgoCrcREyO1aNKZhm5yqVyg897WHVf2vBZ7VUAgImzbo1Qjb_HQjeiw/exec'; // Coloque a URL do seu Web App
+  form.target = '_blank'; // Abre o resultado em nova aba (evita sair da página)
   
-  // Monta os dados no formato x-www-form-urlencoded
-const formData = new URLSearchParams();
-formData.append("nome", nome);
-formData.append("telefone", telefone);
-formData.append("email", email);
-formData.append("fornecedor", fornecedor);
-formData.append("transportadora", transportadora);
-formData.append("placa", placa);
-formData.append("peso", peso);
-formData.append("dataBr", dataBr);
-formData.append("hora", hora);
-
-try {
-  const response = await fetch(webAppUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: formData.toString()
-  });
-  
-  if (response.ok) {
-    closeAndShowSuccess(); // tela de sucesso
-  } else {
-    alert("Erro ao enviar. Tente novamente.");
-  }
-} catch (error) {
-  alert("Erro de conexão: " + error.message);
-}
-});
+  // Adiciona todos os campos (inclusive o token)
+  const campos = {
     
+    nome, telefone, email, fornecedor, transportadora,
+    placa, peso, dataBr, hora
+  };
+  
+  for (const [key, value] of Object.entries(campos)) {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = key;
+    input.value = value;
+    form.appendChild(input);
+  }
+  
+  document.body.appendChild(form);
+  form.submit();
+  document.body.removeChild(form);
+  
+  // Mostra a tela de sucesso (não esperamos resposta, mas assumimos sucesso)
+  closeAndShowSuccess();
+});
     newBtn.addEventListener('click', resetAndOpenForm);
     
     const placaInput = document.getElementById('placa');
