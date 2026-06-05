@@ -6,7 +6,7 @@
   <title>Agendamento de Entregas | Logística</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700;800&display=swap');
     * { font-family: 'Inter', system-ui, sans-serif; }
     body { background: #EFF2F5; }
     .input-focus:focus {
@@ -80,7 +80,7 @@
                 <input type="text" id="placa" required placeholder="ABC1D23" maxlength="7" class="placa-input input-focus w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-gray-50/50 focus:bg-white transition">
               </div>
 
-              <!-- CAMPOS DE DATA/HORA/PESO COM VALIDAÇÃO EM TEMPO REAL -->
+              <!-- CAMPOS DE DATA/HORA/PESO COM VALIDAÇÃO -->
               <div>
                 <label class="block text-gray-700 text-xs font-semibold mb-1">Peso total (kg) <span class="text-red-500">*</span></label>
                 <input type="number" id="peso" required placeholder="12500" step="0.01" class="input-focus w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-gray-50/50 focus:bg-white transition">
@@ -89,7 +89,6 @@
                 <div>
                   <label class="block text-gray-700 text-xs font-semibold mb-1">Data <span class="text-red-500">*</span></label>
                   <input type="text" id="data" required placeholder="DD/MM/AAAA" maxlength="10" class="input-focus w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-gray-50/50 focus:bg-white transition" autocomplete="off">
-                  <div id="erroData" class="mensagem-horario text-red-600 hidden"></div>
                 </div>
                 <div>
                   <label class="block text-gray-700 text-xs font-semibold mb-1">Hora <span class="text-red-500">*</span></label>
@@ -172,9 +171,48 @@
   </div>
 
   <script>
-    // ==================== CONFIGURAÇÕES ====================
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz9Z2lCMSuCqRyLWX5Et0E0jawxr16FlevedfpMVvKybl6dXMgtrTruVTevQ_9bvUPV2w/exec"; // 🔁 Substitua pela sua URL do Web App
-    //const TOKEN = "MEU_TOKEN_SUPER_SECRETO_123"; // 🔁 Mesmo token do Apps Script
+    // ==================== CONFIGURAÇÕES (SUBSTITUA AQUI) ====================
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz9Z2lCMSuCqRyLWX5Et0E0jawxr16FlevedfpMVvKybl6dXMgtrTruVTevQ_9bvUPV2w/exec"; // 🔁 URL do seu Web App
+   // const TOKEN = "MEU_TOKEN_SUPER_SECRETO_123"; // 🔁 Mesmo token do Apps Script
+
+    // ==================== FUNÇÕES AUXILIARES ====================
+    function horaParaDecimal(horaStr) {
+      const [h, m] = horaStr.split(':').map(Number);
+      return h + (m / 60);
+    }
+
+    function formatarHoraDecimal(dec) {
+      const h = Math.floor(dec);
+      const m = Math.round((dec - h) * 60);
+      return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
+    }
+
+    // Calcula horas de bloqueio conforme regra: até 5000kg -> 1h; acima, +1h a cada 5000kg completos ou fração?
+    // Regra: "se passar de 5000 travar 2h, se marcar 15000 travar 3h"
+    // Portanto: peso <= 5000 -> 1h; 5001-10000 -> 2h; 10001-15000 -> 3h; etc.
+    function calcularBloqueio(pesoKg) {
+      if (pesoKg <= 5000) return 1;
+      // Adiciona 1h para cada 5000kg completos (considerando >5000)
+      const adicional = Math.ceil((pesoKg - 5000) / 5000);
+      return 1 + adicional;
+    }
+
+    function calcularIntervalo(horaStr, pesoKg) {
+      const inicio = horaParaDecimal(horaStr);
+      const duracao = calcularBloqueio(pesoKg);
+      const fim = inicio + duracao;
+      return { inicio, fim, duracao };
+    }
+
+    function temConflito(novoInicio, novoFim, intervalosExistentes) {
+      for (let inter of intervalosExistentes) {
+        // Verifica sobreposição: dois intervalos se sobrepõem se o início de um é menor que o fim do outro e vice-versa
+        if (Math.max(novoInicio, inter.inicio) < Math.min(novoFim, inter.fim)) {
+          return true;
+        }
+      }
+      return false;
+    }
 
     // ==================== MÁSCARAS E VALIDAÇÕES BÁSICAS ====================
     function mascaraTelefone(e) {
@@ -218,49 +256,17 @@
     function validarPlaca(placa) { return /^[A-Za-z0-9]{7}$/.test(placa); }
     function validarEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
-    // ==================== LÓGICA DE BLOQUEIO (horas decimais) ====================
-    function horaParaDecimal(horaStr) {
-      const [h, m] = horaStr.split(':').map(Number);
-      return h + (m / 60);
-    }
-
-    function formatarHoraDecimal(dec) {
-      const h = Math.floor(dec);
-      const m = Math.round((dec - h) * 60);
-      return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
-    }
-
-    // Calcula o intervalo ocupado para um agendamento (início e fim)
-    function calcularIntervalo(horaStr, pesoKg) {
-      const inicio = horaParaDecimal(horaStr);
-      // Bloqueio mínimo 1h fixa + 1h a cada 5000kg (ou fração)
-      const horasAdicionais = Math.ceil(pesoKg / 5000);
-      const duracao = 1 + horasAdicionais;
-      const fim = inicio + duracao;
-      return { inicio, fim, duracao };
-    }
-
-    // Verifica se o novo intervalo conflita com algum existente
-    function temConflito(novoInicio, novoFim, intervalosExistentes) {
-      for (let inter of intervalosExistentes) {
-        if (Math.max(novoInicio, inter.inicio) < Math.min(novoFim, inter.fim)) {
-          return true;
-        }
-      }
-      return false;
-    }
-
     // ==================== CONSULTA JSONP ====================
     let intervalosCache = [];      // armazena os intervalos da data selecionada
     let consultaEmAndamento = false;
     let ultimaDataConsultada = "";
 
     function consultarIntervalos(dataStr, callback) {
+      if (!dataStr) return;
       if (consultaEmAndamento) return;
       consultaEmAndamento = true;
       ultimaDataConsultada = dataStr;
 
-      // Cria um callback global único
       const callbackName = "jsonp_callback_" + Date.now() + "_" + Math.floor(Math.random() * 100000);
       window[callbackName] = function(intervalos) {
         delete window[callbackName];
@@ -271,17 +277,18 @@
       const script = document.createElement('script');
       script.src = `${WEB_APP_URL}?data=${encodeURIComponent(dataStr)}&callback=${callbackName}`;
       script.onerror = function() {
+        console.error("Erro JSONP");
         delete window[callbackName];
         consultaEmAndamento = false;
-        document.getElementById('mensagemHorario').innerHTML = '<span class="text-red-600">⚠️ Erro ao consultar disponibilidade. Tente novamente.</span>';
+        document.getElementById('mensagemHorario').innerHTML = '<span class="text-red-600">⚠️ Erro ao consultar disponibilidade. Verifique a conexão.</span>';
         intervalosCache = [];
         if (callback) callback([]);
       };
       document.body.appendChild(script);
-      document.body.removeChild(script);
+      setTimeout(() => { if (document.body.contains(script)) document.body.removeChild(script); }, 100);
     }
 
-    // ==================== VALIDAÇÃO LOCAL (chamada após consulta ou alteração) ====================
+    // ==================== VALIDAÇÃO LOCAL ====================
     function validarHorarioLocal() {
       const data = dataInput.value.trim();
       const hora = document.getElementById('hora').value;
@@ -300,7 +307,6 @@
         return;
       }
 
-      // Converte a hora para decimal e valida se está dentro do expediente (opcional, mas útil)
       const horaNum = horaParaDecimal(hora);
       if (horaNum < 8 || horaNum >= 17 || (horaNum >= 12 && horaNum < 13)) {
         msgDiv.innerHTML = '<span class="text-red-600">⏰ Horário fora do expediente (08:00 às 12:00 ou 13:00 às 17:00)</span>';
@@ -308,22 +314,28 @@
         return;
       }
 
-      // Se ainda não temos cache para esta data, faz a consulta e espera
+      // Se a data mudou, precisa consultar novamente
       if (ultimaDataConsultada !== data) {
         consultarIntervalos(data, function(intervalos) {
           intervalosCache = intervalos;
-          // Após consulta, reexecuta a validação
-          validarHorarioLocal();
+          validarHorarioLocal(); // reavalia após consulta
         });
         msgDiv.innerHTML = '<span class="text-gray-500">🔄 Verificando horários disponíveis...</span>';
         window.horarioValido = false;
         return;
       }
 
-      // Se a consulta já foi feita (cache presente), calcula o novo intervalo
+      // Se ainda está consultando, aguarda
+      if (consultaEmAndamento) {
+        msgDiv.innerHTML = '<span class="text-gray-500">🔄 Aguardando consulta...</span>';
+        window.horarioValido = false;
+        return;
+      }
+
+      // Agora sim, valida com os intervalos em cache
       const { inicio: novoInicio, fim: novoFim, duracao } = calcularIntervalo(hora, peso);
       if (temConflito(novoInicio, novoFim, intervalosCache)) {
-        msgDiv.innerHTML = `<span class="text-red-600">❌ Horário indisponível. O veículo ocupará ${duracao}h (${formatarHoraDecimal(novoInicio)} às ${formatarHoraDecimal(novoFim)}). Há conflito com outro agendamento.</span>`;
+        msgDiv.innerHTML = `<span class="text-red-600">❌ Horário indisponível. O veículo ocupará ${duracao}h (${formatarHoraDecimal(novoInicio)} às ${formatarHoraDecimal(novoFim)}). Conflito com outro agendamento.</span>`;
         window.horarioValido = false;
       } else {
         msgDiv.innerHTML = `<span class="text-green-600">✅ Horário disponível! (bloqueio de ${duracao}h, das ${formatarHoraDecimal(novoInicio)} às ${formatarHoraDecimal(novoFim)})</span>`;
@@ -331,7 +343,7 @@
       }
     }
 
-    // Gatilhos para revalidar quando algo mudar
+    // Gatilhos
     document.getElementById('data').addEventListener('change', function() {
       const data = this.value.trim();
       if (data && validarDataCompleta(data)) {
@@ -346,7 +358,7 @@
     document.getElementById('hora').addEventListener('input', validarHorarioLocal);
     document.getElementById('peso').addEventListener('input', validarHorarioLocal);
 
-    // ==================== ENVIO DO FORMULÁRIO (POST sem AJAX) ====================
+    // ==================== ENVIO DO FORMULÁRIO ====================
     const formContainer = document.getElementById('formContent');
     const successScreen = document.getElementById('successScreen');
     const notaFiscalContainer = document.getElementById('notaFiscalContainer');
@@ -377,7 +389,7 @@
     agendamentoForm.addEventListener('submit', function(e) {
       e.preventDefault();
 
-      // Coleta e valida todos os campos
+      // Coleta e valida os campos
       const nome = document.getElementById('nome').value.trim();
       const telefone = document.getElementById('telefone').value.trim();
       const email = document.getElementById('email').value.trim();
@@ -410,14 +422,14 @@
         return;
       }
 
-      // Cria um formulário invisível para POST (evita CORS)
+      // Envia via POST tradicional (nova aba)
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = WEB_APP_URL;
-      form.target = '_blank'; // abre a resposta em nova aba
+      form.target = '_blank';
 
       const campos = {
-        //token: TOKEN,
+       // token: TOKEN,
         nome, telefone, email, fornecedor, transportadora,
         placa, peso, dataBr, hora
       };
