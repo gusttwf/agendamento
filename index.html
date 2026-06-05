@@ -80,7 +80,7 @@
   </style>
 </head>
 <body class="bg-[#EFF2F5] antialiased flex items-center justify-center min-h-screen p-4 md:p-6">
-
+<iframe id="consultaIframe" style="display:none;"></iframe>
   <div class="max-w-7xl w-full mx-auto">
     <div class="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100/80">
       <div class="flex flex-col lg:flex-row">
@@ -305,9 +305,85 @@
       successScreen.style.display = 'none';
       document.querySelector('.lg:w-2/3').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+    // Função que será chamada pelo JSONP
+function receberIntervalos(intervalos) {
+  window.intervalosOcupados = intervalos; // guarda globalmente
+  window.consultaPronta = true;
+  // Agora podemos validar o horário atual
+  validarHorarioLocal();
+}
+
+// Função que consulta os intervalos de uma data via JSONP
+function consultarIntervalosJSONP(data, callbackNome) {
+  const script = document.createElement('script');
+  script.src = `${webAppUrl}?data=${encodeURIComponent(data)}&callback=${callbackNome}`;
+  document.body.appendChild(script);
+  script.onload = () => document.body.removeChild(script);
+}
+
+// Valida o horário atual com base nos intervalos ocupados (regras)
+function validarHorarioLocal() {
+  const data = document.getElementById('data').value.trim();
+  const hora = document.getElementById('hora').value;
+  const peso = parseFloat(document.getElementById('peso').value);
+  
+  if (!data || !hora || isNaN(peso)) return;
+  
+  const inicioNovo = horaParaDecimalJS(hora);
+  const duracaoNovo = 1 + Math.ceil(peso / 5000);
+  const fimNovo = inicioNovo + duracaoNovo;
+  
+  let conflito = false;
+  let mensagem = '';
+  
+  if (window.intervalosOcupados && window.intervalosOcupados.length) {
+    for (let inter of window.intervalosOcupados) {
+      if (Math.max(inicioNovo, inter.inicio) < Math.min(fimNovo, inter.fim)) {
+        conflito = true;
+        mensagem = `Horário conflita com agendamento que ocupa das ${formatarHoraJS(inter.inicio)} às ${formatarHoraJS(inter.fim)}.`;
+        break;
+      }
+    }
+  }
+  
+  const mensagemDiv = document.getElementById('erroHorario');
+  if (conflito) {
+    mensagemDiv.innerText = mensagem;
+    mensagemDiv.style.color = 'red';
+    window.horarioValido = false;
+  } else {
+    mensagemDiv.innerText = '✅ Horário disponível';
+    mensagemDiv.style.color = 'green';
+    window.horarioValido = true;
+  }
+}
+
+// Função auxiliar (hora decimal)
+function horaParaDecimalJS(horaStr) {
+  const [h, m] = horaStr.split(':').map(Number);
+  return h + m/60;
+}
+
+function formatarHoraJS(dec) {
+  const h = Math.floor(dec);
+  const m = Math.round((dec - h) * 60);
+  return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
+}
+
+// Eventos: quando data, hora ou peso mudarem, consultar novamente
+document.getElementById('data').addEventListener('change', function() {
+  const data = this.value.trim();
+  if (data) consultarIntervalosJSONP(data, 'receberIntervalos');
+});
+document.getElementById('hora').addEventListener('input', validarHorarioLocal);
+document.getElementById('peso').addEventListener('input', validarHorarioLocal);
 
     agendamentoForm.addEventListener('submit', function(e) {
-  e.preventDefault();
+    e.preventDefault();
+  if (!window.horarioValido) {
+    alert("Corrija o horário antes de enviar.");
+    return;
+  }
   
   // Coleta e valida os campos (igual antes)
   const nome = document.getElementById('nome').value.trim();
@@ -339,7 +415,7 @@
   const form = document.createElement('form');
   form.method = 'POST';
   form.action = 'https://script.google.com/macros/s/AKfycbz9Z2lCMSuCqRyLWX5Et0E0jawxr16FlevedfpMVvKybl6dXMgtrTruVTevQ_9bvUPV2w/exec'; // Coloque a URL do seu Web App
-  form.target = '_blank'; // Abre o resultado em nova aba (evita sair da página)
+  form.target = '_blank'; // Abre o resultado em nova aba (evita sair da página) 
   
   // Adiciona todos os campos (inclusive o token)
   const campos = {
